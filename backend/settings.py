@@ -10,7 +10,7 @@ TIKTOK_REDIRECT_URI = (os.getenv("TIKTOK_REDIRECT_URI") or "").strip()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = "django-insecure-^-j(u6n$x_p2&4owh51o-(v$inc1m+=xkduj!c7+cn7&2uaodc"
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "django-insecure-fallback")
 DEBUG = True
 ALLOWED_HOSTS = []
 
@@ -23,9 +23,11 @@ AUTHENTICATION_BACKENDS = (
     "social_core.backends.google.GoogleOAuth2",
 )
 SOCIAL_AUTH_GOOGLE_OAUTH2_KEY = (
-    "412539470688-3panqg2vlvuf71dfs2itnr2l0cakpr19.apps.googleusercontent.com"
-)
-SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET = "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"
+    os.getenv("SOCIAL_AUTH_GOOGLE_OAUTH2_KEY") or ""
+).strip()
+SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET = (
+    os.getenv("SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET") or ""
+).strip()
 SOCIAL_AUTH_GOOGLE_OAUTH2_SCOPE = [
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
@@ -34,8 +36,8 @@ OAUTH2_PROVIDER = {
     "ACCESS_TOKEN_EXPIRE_SECONDS": 3600,
     "REFRESH_TOKEN_EXPIRE_SECONDS": 86400,
 }
-MIDTRANS_SERVER_KEY = "Mid-server-cUsADfX0yZec1JO52aKV5lZ-"
-MIDTRANS_CLIENT_KEY = "Mid-client-u4JIXid9F2SuG9eS"
+MIDTRANS_SERVER_KEY = (os.getenv("MIDTRANS_SERVER_KEY") or "").strip()
+MIDTRANS_CLIENT_KEY = (os.getenv("MIDTRANS_CLIENT_KEY") or "").strip()
 MIDTRANS_IS_PRODUCTION = False
 # Installed Apps
 INSTALLED_APPS = [
