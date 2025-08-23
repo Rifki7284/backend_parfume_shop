@@ -14,7 +14,7 @@ urlpatterns = [
     path("api/", include("cart.urls")),
     path("api/orders/", include("order.urls")),
     path("api/payments/", include("payment.urls")),
-    path("",include("tokopedia.urls")),
+    path("",include("tiktok.urls")),
     path("api-auth/", include("rest_framework.urls", namespace="drf"))
 
     # path("auth/", include("drf_social_oauth2.urls", namespace="drf")),

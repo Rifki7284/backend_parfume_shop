@@ -9,10 +9,10 @@ from urllib.parse import urlparse
 import json
 import requests
 import time
-
+from django.views.decorators.csrf import csrf_exempt
 TIKTOK_APP_KEY = "6h7mvifltn5ft"
 TIKTOK_APP_SECRET = "fc8a575471cba9137ff9b1031a17b8ddf8bf6f03"
-ACCESS_TOKEN = "ROW_FdyRIAAAAAAtBjpXonNymt3IiN_W-ebc6-djOYM0peX5Q2LW70-2fKTF6qdCC_QUPAYR_BQgs8nq8AaOEb9VOIyjz8bpxgbPK6HVy4auhapP_YVq2yzB4rfu9VZaqux1JBtay0obv58"
+ACCESS_TOKEN = "ROW_YOM-RgAAAAAtBjpXonNymt3IiN_W-ebc6-djOYM0peX5Q2LW70-2fN1KzontN-qO7ookKra1UF5hdw60KiRmcakNfBnCiVFn17gqMFLBfE2QkPdyC5TV8D4xECynlHGcDDpSCiL5VnU"
 
 BASE_URL = "https://open-api.tiktokglobalshop.com"
 
@@ -65,7 +65,7 @@ import time
 import requests
 
 
-def get_orders(request):
+def get_auth_shop(request):
     path = "/authorization/202309/shops"
     timestamp = int(time.time())
     params = {
@@ -99,6 +99,42 @@ def get_orders(request):
     print("Headers:", response.request.headers)
     return JsonResponse(response.json())
 
+@csrf_exempt
+def get_orders_list(request):
+    path = "/order/202309/orders/search"
+    timestamp = int(time.time())
+    params = {
+        "app_key": TIKTOK_APP_KEY,
+        "timestamp": timestamp,
+        "access_token": ACCESS_TOKEN,
+        "page_size":"1",
+        "shop_cipher":"ROW_zd-y1QAAAAC6SwPm247gu7HfNeEcnZSe"
+    }
+
+    request_option = {
+        "qs": params,
+        "uri": path,
+        "headers": {
+            "content-type": "application/json",
+            "x-tts-access-token": "ROW_YOM-RgAAAAAtBjpXonNymt3IiN_W-ebc6-djOYM0peX5Q2LW70-2fN1KzontN-qO7ookKra1UF5hdw60KiRmcakNfBnCiVFn17gqMFLBfE2QkPdyC5TV8D4xECynlHGcDDpSCiL5VnU",
+        },
+        "body": {},
+    }
+
+    sign = generate_sign(request_option, TIKTOK_APP_SECRET)
+    params["sign"] = sign
+
+    url = f"{BASE_URL}{path}"
+    response = requests.post(
+        url,
+        params=params,
+        headers={
+            "Content-Type": "application/json",
+            "x-tts-access-token": "ROW_YOM-RgAAAAAtBjpXonNymt3IiN_W-ebc6-djOYM0peX5Q2LW70-2fN1KzontN-qO7ookKra1UF5hdw60KiRmcakNfBnCiVFn17gqMFLBfE2QkPdyC5TV8D4xECynlHGcDDpSCiL5VnU",
+        },
+    )
+    print("Headers:", response.request.headers)
+    return JsonResponse(response.json())
 
 def tiktok_authorize(request):
     """

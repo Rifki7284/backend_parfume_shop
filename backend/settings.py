@@ -47,11 +47,13 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    #cron
+    'django_crontab',
     # apps kamu
     "users",
     "store",
     "cart",
-    "tokopedia",
+    "tiktok",
     "order",
     # third-party
     "social_django",
