@@ -26,27 +26,12 @@ ALLOWED_HOSTS = []
 AUTHENTICATION_BACKENDS = (
     "django.contrib.auth.backends.ModelBackend",  # default
     "oauth2_provider.backends.OAuth2Backend",  # untuk OAuth2
-    "drf_social_oauth2.backends.DjangoOAuth2",
     "django.contrib.auth.backends.ModelBackend",
-    "social_core.backends.google.GoogleOAuth2",
 )
-SOCIAL_AUTH_GOOGLE_OAUTH2_KEY = (
-    os.getenv("SOCIAL_AUTH_GOOGLE_OAUTH2_KEY") or ""
-).strip()
-SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET = (
-    os.getenv("SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET") or ""
-).strip()
-SOCIAL_AUTH_GOOGLE_OAUTH2_SCOPE = [
-    "https://www.googleapis.com/auth/userinfo.email",
-    "https://www.googleapis.com/auth/userinfo.profile",
-]
 OAUTH2_PROVIDER = {
     "ACCESS_TOKEN_EXPIRE_SECONDS": 3600,
     "REFRESH_TOKEN_EXPIRE_SECONDS": 86400,
 }
-MIDTRANS_SERVER_KEY = (os.getenv("MIDTRANS_SERVER_KEY") or "").strip()
-MIDTRANS_CLIENT_KEY = (os.getenv("MIDTRANS_CLIENT_KEY") or "").strip()
-MIDTRANS_IS_PRODUCTION = False
 # Installed Apps
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -60,12 +45,8 @@ INSTALLED_APPS = [
     # apps kamu
     "users",
     "store",
-    "cart",
     "tiktok",
-    "order",
     # third-party
-    "social_django",
-    "drf_social_oauth2",
     "oauth2_provider",
     "corsheaders",
     "channels",
@@ -73,21 +54,7 @@ INSTALLED_APPS = [
     "rest_framework.authtoken",
     "dj_rest_auth",
     "dj_rest_auth.registration",
-    "allauth",
-    "allauth.account",
-    "allauth.socialaccount",
-    "allauth.socialaccount.providers.google",
-    "allauth.socialaccount.providers.facebook",
 ]
-SOCIALACCOUNT_AUTO_SIGNUP = True
-SOCIALACCOUNT_LOGIN_ON_GET = True
-LOGIN_REDIRECT_URL = "http://localhost:3000/"
-SOCIALACCOUNT_PROVIDERS = {
-    "google": {
-        "SCOPE": ["profile", "email"],
-        "AUTH_PARAMS": {"access_type": "online"},
-    }
-}
 # ACCOUNT_ADAPTER = "users.adapter.AutoLoginSocialAccountAdapter"
 Q_CLUSTER = {
     "name": "DjangoQ",
@@ -102,8 +69,7 @@ Q_CLUSTER = {
 # REST Framework
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "oauth2_provider.contrib.rest_framework.OAuth2Authentication",  # django-oauth-toolkit >= 1.0.0
-        "drf_social_oauth2.authentication.SocialAuthentication",
+        "oauth2_provider.contrib.rest_framework.OAuth2Authentication", 
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
 }
@@ -122,7 +88,6 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "allauth.account.middleware.AccountMiddleware",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -142,8 +107,6 @@ TEMPLATES = [
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
-                "social_django.context_processors.backends",
-                "social_django.context_processors.login_redirect",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
             ],

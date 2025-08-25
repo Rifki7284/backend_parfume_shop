@@ -46,19 +46,26 @@ class CustomLoginView(TokenView):
             access_token_str = data.get("access_token")
             refresh_token = data.get("refresh_token")
 
-            # Ambil access token object dari DB
             try:
                 token = AccessToken.objects.select_related("user").get(
                     token=access_token_str,
                     expires__gt=datetime.now(),
                 )
                 user = token.user
+
+                # ✅ Cek apakah user aktif
+                if not user.is_active:
+                    return JsonResponse(
+                        {"error": "Akun ini tidak aktif, silakan hubungi admin."},
+                        status=403
+                    )
+
                 user_data = {
                     "id": user.id,
                     "username": user.username,
                     "email": user.email,
-                    # tambahkan jika perlu
                 }
+
             except AccessToken.DoesNotExist:
                 return JsonResponse({"error": "Invalid access token"}, status=401)
 

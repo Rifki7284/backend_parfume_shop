@@ -3,7 +3,7 @@ import logging
 from datetime import timedelta
 from typing import Tuple
 import time
-
+from datetime import timedelta, timezone as dt_timezone
 import requests
 from django.conf import settings
 from django.db import transaction
@@ -39,7 +39,7 @@ def _parse_expire(value):
 
     # kalau nilainya > sekarang + 1 hari → anggap epoch timestamp
     if v > now_ts + 86400:
-        return timezone.datetime.fromtimestamp(v, tz=timezone.utc)
+        return timezone.datetime.fromtimestamp(v, tz=dt_timezone.utc)
     else:
         return timezone.now() + timedelta(seconds=v)
 
