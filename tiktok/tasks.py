@@ -1,24 +1,22 @@
+# tiktok/tasks.py
+import logging
 from django.utils import timezone
-from .models import TikTokToken
-from .services.tiktok_auth import refresh_access_token
+from datetime import timedelta
+from tiktok.models import TikTokToken
+from tiktok.services.tiktok_auth import refresh_access_token, TikTokAuthError
 
-def scheduled_refresh():
-    """
-    Cron job untuk cek apakah access token sudah expired
-    lalu refresh otomatis.
-    """
-    token = TikTokToken.objects.last()
+logger = logging.getLogger(__name__)
+
+def refresh_token_if_needed():
+    token = TikTokToken.objects.order_by("-id").first()
     if not token:
-        print("⚠️ Tidak ada TikTok token di database.")
+        logger.warning("Tidak ada TikTokToken di DB; lewati refresh.")
         return
 
-    # Kalau sudah expired atau tinggal < 5 menit lagi → refresh
-    if timezone.now() >= token.access_token_expire_at or \
-       (token.access_token_expire_at - timezone.now()).total_seconds() < 300:
+    # jika sisa < 10 menit, refresh
+    if token.access_token_expire_at - timezone.now() <= timedelta(minutes=10):
         try:
             refresh_access_token()
-            print("✅ TikTok token berhasil diperbarui otomatis")
-        except Exception as e:
-            print(f"❌ Gagal refresh token: {e}")
-    else:
-        print("ℹ️ Access token masih valid, tidak perlu refresh.")
+            logger.info("Auto-refresh TikTok access_token berhasil.")
+        except TikTokAuthError as e:
+            logger.error("Auto-refresh gagal: %s", e)

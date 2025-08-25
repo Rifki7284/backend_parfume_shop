@@ -2,11 +2,19 @@ from pathlib import Path
 import os
 
 # env
+import environ
 import os
 
-TIKTOK_APP_KEY = (os.getenv("TIKTOK_APP_KEY") or "").strip()
-TIKTOK_APP_SECRET = (os.getenv("TIKTOK_APP_SECRET") or "").strip()
-TIKTOK_REDIRECT_URI = (os.getenv("TIKTOK_REDIRECT_URI") or "").strip()
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+env = environ.Env()
+environ.Env.read_env(os.path.join(BASE_DIR, ".env"))
+
+# akses variabel
+TIKTOK_APP_KEY = env("TIKTOK_APP_KEY", default="")
+TIKTOK_APP_SECRET = env("TIKTOK_APP_SECRET", default="")
+TIKTOK_REDIRECT_URI = env("TIKTOK_REDIRECT_URI", default="")
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -48,7 +56,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     #cron
-    'django_crontab',
+    "django_q",
     # apps kamu
     "users",
     "store",
@@ -81,6 +89,15 @@ SOCIALACCOUNT_PROVIDERS = {
     }
 }
 # ACCOUNT_ADAPTER = "users.adapter.AutoLoginSocialAccountAdapter"
+Q_CLUSTER = {
+    "name": "DjangoQ",
+    "workers": 2,
+    "timeout": 90,
+    "retry": 120,
+    "queue_limit": 50,
+    "bulk": 10,
+    "orm": "default",
+}
 
 # REST Framework
 REST_FRAMEWORK = {
