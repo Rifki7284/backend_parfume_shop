@@ -9,6 +9,7 @@ urlpatterns = [
     path("api/account/", include("users.urls")),
     path("api/store/", include("store.urls")),
     path("drf-auth/", include("rest_framework.urls", namespace="drf")),
+    
     path("",include("tiktok.urls")),
 ]
 

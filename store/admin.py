@@ -10,9 +10,8 @@ class ProductImageInline(admin.TabularInline):
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ('id', 'name', 'price', 'stock', 'category')
-    list_display_links = ('id', 'name')  # nama jadi link ke halaman edit
-    list_filter = ('category',)
+    list_display = ('id', 'name', 'price')
+    list_display_links = ('id', 'name')
     search_fields = ('name', 'description')
     inlines = [ProductImageInline]
 

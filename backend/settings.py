@@ -1,19 +1,19 @@
 from pathlib import Path
 import os
 
-# env
+from pathlib import Path
 import environ
-import os
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 env = environ.Env()
-environ.Env.read_env(os.path.join(BASE_DIR, ".env"))
+environ.Env.read_env(BASE_DIR / ".env")
 
 # akses variabel
-TIKTOK_APP_KEY = env("TIKTOK_APP_KEY", default="")
-TIKTOK_APP_SECRET = env("TIKTOK_APP_SECRET", default="")
-TIKTOK_REDIRECT_URI = env("TIKTOK_REDIRECT_URI", default="")
+TIKTOK_APP_KEY = env("TIKTOK_APP_KEY", default="").strip()
+TIKTOK_APP_SECRET = env("TIKTOK_APP_SECRET", default="").strip()
+TIKTOK_REDIRECT_URI = env("TIKTOK_REDIRECT_URI", default="").strip()
+
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -91,7 +91,7 @@ MIDDLEWARE = [
 ]
 
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOWED_ORIGINS = ["http://localhost:3000"]
+CORS_ALLOWED_ORIGINS = ["http://localhost:3000","http://127.0.0.1:5500"]
 
 CSRF_COOKIE_SECURE = False
 SESSION_COOKIE_SECURE = False

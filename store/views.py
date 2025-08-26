@@ -7,13 +7,20 @@ from rest_framework.authentication import SessionAuthentication
 from .models import Product
 from .serializers import ProductSerializer
 
-
-# API untuk menampilkan semua produk
-class ProductListAPIView(generics.ListAPIView):
-    authentication_classes = [SessionAuthentication]  # pakai session
-    permission_classes = [IsAuthenticated]
-    queryset = Product.objects.all().prefetch_related("images")
+from rest_framework import viewsets, permissions
+from .models import Product
+from .serializers import ProductSerializer
+from rest_framework.permissions import AllowAny
+class ProductViewSet(viewsets.ModelViewSet):
+    queryset = Product.objects.prefetch_related("images").all()
     serializer_class = ProductSerializer
+    permission_classes = [AllowAny]
+
+# class ProductListAPIView(generics.ListAPIView):
+#     authentication_classes = [SessionAuthentication]  # pakai session
+#     permission_classes = [IsAuthenticated]
+#     queryset = Product.objects.all().prefetch_related("images")
+#     serializer_class = ProductSerializer
 
 
 # API untuk detail produk by ID (pk)

@@ -9,11 +9,15 @@ from urllib.parse import urlparse
 import json
 import requests
 import time
-
+from django.http import JsonResponse
+import time
+import requests
 from tiktok.utils.tiktok_token import get_valid_access_token
 from django.views.decorators.csrf import csrf_exempt
-TIKTOK_APP_KEY = "6h7mvifltn5ft"
-TIKTOK_APP_SECRET = "fc8a575471cba9137ff9b1031a17b8ddf8bf6f03"
+from django.conf import settings
+
+TIKTOK_APP_KEY = str(settings.TIKTOK_APP_KEY).strip()
+TIKTOK_APP_SECRET = str(settings.TIKTOK_APP_SECRET).strip()
 
 BASE_URL = "https://open-api.tiktokglobalshop.com"
 
@@ -61,17 +65,13 @@ def generate_sign(request_option, app_secret):
     return sign
 
 
-from django.http import JsonResponse
-import time
-import requests
-
 
 def get_auth_shop(request):
     ACCESS_TOKEN = get_valid_access_token()
     path = "/authorization/202309/shops"
     timestamp = int(time.time())
     params = {
-        "app_key": TIKTOK_APP_KEY,
+        "app_key": TIKTOK_APP_KEY.strip(),
         "timestamp": timestamp,
         "access_token": ACCESS_TOKEN,  # taruh di query param, bukan header
     }
@@ -94,7 +94,7 @@ def get_auth_shop(request):
             "x-tts-access-token":ACCESS_TOKEN,
         },
     )
-    print("Headers:", response.request.headers)
+
     return JsonResponse(response.json())
 
 @csrf_exempt
@@ -102,11 +102,14 @@ def get_orders_list(request,cipher):
     ACCESS_TOKEN = get_valid_access_token()
     path = "/order/202309/orders/search"
     timestamp = int(time.time())
+    page_token = request.GET.get("page_token", "")
+    page_size = request.GET.get("page_size", "3")  # default 10
     params = {
         "app_key": TIKTOK_APP_KEY,
         "timestamp": timestamp,
         "access_token": ACCESS_TOKEN,
-        "page_size":"100",
+        "page_size":page_size,
+        "page_token":page_token,
         "shop_cipher":cipher
     }
 
@@ -128,7 +131,7 @@ def get_orders_list(request,cipher):
             "x-tts-access-token":ACCESS_TOKEN,
         }
     )
-    print("Headers:", response.request.headers)
+
     return JsonResponse(response.json())
 
 def tiktok_authorize(request):
