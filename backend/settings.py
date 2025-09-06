@@ -15,6 +15,10 @@ TIKTOK_APP_SECRET = env("TIKTOK_APP_SECRET", default="").strip()
 TIKTOK_REDIRECT_URI = env("TIKTOK_REDIRECT_URI", default="").strip()
 
 
+BINDERBYTE_API_KEY = env("BINDERBYTE_API_KEY", default="").strip()
+BINDERBYTE_BASE_URL = "https://api.binderbyte.com/v1"
+BINDERBYTE_TIMEOUT = 12
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
