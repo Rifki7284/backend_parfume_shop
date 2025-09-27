@@ -1,7 +1,8 @@
 from django.urls import path
-from .views import CustomLoginView,account_me
+from .views import Check_token,StaffLoginView
 urlpatterns = [
-    # path("protected/", ProtectedView.as_view(), name="protected"),
-    path("login/", CustomLoginView.as_view(), name="custom_login"),
-    path("me/", account_me),
+    # path("login/", CustomLoginView.as_view(), name="custom_login"),
+    # path("me/", account_me),
+    path("check/token",Check_token),
+    path("login/staff",StaffLoginView.as_view())
 ]

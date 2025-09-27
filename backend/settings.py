@@ -3,12 +3,15 @@ import os
 
 from pathlib import Path
 import environ
-
+TIME_ZONE = 'Asia/Jakarta'
+USE_TZ = True
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 env = environ.Env()
 environ.Env.read_env(BASE_DIR / ".env")
-
+PARTNER_ID = env("PARTNER_ID", default="").strip()
+PARTNER_KEY = env("PARTNER_KEY", default="").strip()
+SHOP_ID = env("SHOP_ID", default="").strip()
 # akses variabel
 TIKTOK_APP_KEY = env("TIKTOK_APP_KEY", default="").strip()
 TIKTOK_APP_SECRET = env("TIKTOK_APP_SECRET", default="").strip()
@@ -44,14 +47,17 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    #cron
+    # cron
     "django_q",
     # apps kamu
     "users",
     "store",
     "tiktok",
+    "shopee",
+    
     # third-party
     "oauth2_provider",
+    "django_extensions",
     "corsheaders",
     "channels",
     "rest_framework",
@@ -59,6 +65,7 @@ INSTALLED_APPS = [
     "dj_rest_auth",
     "dj_rest_auth.registration",
 ]
+# AUTH_USER_MODEL = "user_account.CustomUser"
 # ACCOUNT_ADAPTER = "users.adapter.AutoLoginSocialAccountAdapter"
 Q_CLUSTER = {
     "name": "DjangoQ",
@@ -73,7 +80,7 @@ Q_CLUSTER = {
 # REST Framework
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "oauth2_provider.contrib.rest_framework.OAuth2Authentication", 
+        "oauth2_provider.contrib.rest_framework.OAuth2Authentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
 }
@@ -95,7 +102,7 @@ MIDDLEWARE = [
 ]
 
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOWED_ORIGINS = ["http://localhost:3000","http://127.0.0.1:5500"]
+CORS_ALLOWED_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:5500"]
 
 CSRF_COOKIE_SECURE = False
 SESSION_COOKIE_SECURE = False
@@ -158,6 +165,7 @@ USE_TZ = True
 STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+BASE_DIR = Path(__file__).resolve().parent.parent
 
-MEDIA_URL = "/uploads/"
-MEDIA_ROOT = os.path.join(BASE_DIR, "uploads")
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR,"media/")

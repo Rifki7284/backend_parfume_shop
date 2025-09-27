@@ -1,42 +1,24 @@
 from rest_framework import serializers
 from .models import Product, ProductImage
 
-
 class ProductImageSerializer(serializers.ModelSerializer):
+    image_url = serializers.SerializerMethodField()
+
     class Meta:
         model = ProductImage
-        fields = ["id", "image"]  # id penting buat update/hapus
+        fields = ["id", "image", "image_url"]
+
+    def get_image_url(self, obj):
+        request = self.context.get("request")
+        if obj.image and hasattr(obj.image, "url"):
+            return request.build_absolute_uri(obj.image.url)
+        return None
 
 
 class ProductSerializer(serializers.ModelSerializer):
-    images = ProductImageSerializer(many=True, required=False)
+    images = ProductImageSerializer(many=True, read_only=True)
 
     class Meta:
         model = Product
-        fields = ["id", "name", "description", "price", "slug", "images"]
-
-    def create(self, validated_data):
-        images_data = validated_data.pop("images", [])
-        product = Product.objects.create(**validated_data)
-
-        # simpan semua image
-        for image_data in images_data:
-            ProductImage.objects.create(product=product, **image_data)
-
-        return product
-
-    def update(self, instance, validated_data):
-        images_data = validated_data.pop("images", None)
-
-        # update field biasa
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-        instance.save()
-
-        # kalau ada images di payload, replace semua gambar
-        if images_data is not None:
-            instance.images.all().delete()
-            for image_data in images_data:
-                ProductImage.objects.create(product=instance, **image_data)
-
-        return instance
+        fields = ["id", "name", "description", "tokopedia_link",
+                  "shopee_link", "price", "slug", "images"]

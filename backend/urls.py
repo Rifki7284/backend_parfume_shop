@@ -7,9 +7,10 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("o/", include("oauth2_provider.urls", namespace="oauth2_provider")),
     path("api/account/", include("users.urls")),
-    path("api/store/", include("store.urls")),
+    path('api/', include('store.urls')),
     path("drf-auth/", include("rest_framework.urls", namespace="drf")),
-    path("tiktok/",include("tiktok.urls")),
+    path("shopee/", include("shopee.urls")),
+    path("tiktok/", include("tiktok.urls")),
 ]
 
 if settings.DEBUG:

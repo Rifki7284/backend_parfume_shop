@@ -1,171 +1,101 @@
-from rest_framework.decorators import permission_classes
-from rest_framework.permissions import AllowAny
-from oauth2_provider.views import TokenView
-from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_exempt
+from rest_framework.views import APIView
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
 from django.http import JsonResponse
-import json
-from oauth2_provider.decorators import protected_resource
-from django.http import JsonResponse
-from oauth2_provider.decorators import protected_resource
-from oauth2_provider.models import AccessToken
-from rest_framework.decorators import permission_classes
-from rest_framework.permissions import AllowAny
-from oauth2_provider.views import TokenView
-from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_exempt
-from django.http import JsonResponse
-from oauth2_provider.models import AccessToken
-from datetime import datetime
-import json
-from oauth2_provider.models import AccessToken
-@protected_resource()
-def account_me(request):
-    user = request.resource_owner
-    return JsonResponse({"username": user.username})
+from django.contrib.auth.models import User
+from django.core import signing
+import requests
 
-
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def Check_token(request):
+    user = request.user
+    return Response({
+        "username": user.username,
+        "is_staff": user.is_staff,
+        "is_active": user.is_active,
+    })
 @permission_classes([AllowAny])
-class CustomLoginView(TokenView):
-    @method_decorator(csrf_exempt)
-    def dispatch(self, *args, **kwargs):
-        return super().dispatch(*args, **kwargs)
+class StaffLoginView(APIView):
 
     def post(self, request, *args, **kwargs):
-        # Panggil method TokenView post (token exchange)
-        response = super().post(request, *args, **kwargs)
+        username = request.data.get("username")
+        password = request.data.get("password")
+        client_id = request.data.get("client_id")
+        client_secret = request.data.get("client_secret")
 
+        if not all([username, password, client_id, client_secret]):
+            return JsonResponse({"error": "Missing required fields"}, status=400)
+
+        # 🔹 Forward request ke /o/token/
+        token_url = request.build_absolute_uri("/o/token/")
+        payload = {
+            "grant_type": "password",
+            "username": username,
+            "password": password,
+            "client_id": client_id,
+            "client_secret": client_secret,
+        }
+
+        r = requests.post(token_url, data=payload)
+        if r.status_code != 200:
+            return JsonResponse(r.json(), status=r.status_code)
+
+        token_data = r.json()
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+
+        # 🔹 Cari user di DB
         try:
-            data = json.loads(response.content)
-        except json.JSONDecodeError:
-            return JsonResponse(
-                {"error": "Invalid response from token endpoint"}, status=500
-            )
+            user = User.objects.get(username=username)
+        except User.DoesNotExist:
+            return JsonResponse({"error": "User tidak ditemukan"}, status=404)
 
-        if response.status_code == 200:
-            access_token_str = data.get("access_token")
-            refresh_token = data.get("refresh_token")
+        # 🔹 Hanya staff yang boleh login
+        if not user.is_staff:
+            return JsonResponse({"error": "Login hanya untuk staff"}, status=403)
 
-            try:
-                token = AccessToken.objects.select_related("user").get(
-                    token=access_token_str,
-                    expires__gt=datetime.now(),
-                )
-                user = token.user
+        # 🔹 Response custom tanpa token di body
+        res = JsonResponse({
+            "message": "Staff login success",
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "is_staff": user.is_staff,
+            },
+            "access_token":access_token,
+            "refresh_token":refresh_token
+        })
 
-                # ✅ Cek apakah user aktif
-                if not user.is_active:
-                    return JsonResponse(
-                        {"error": "Akun ini tidak aktif, silakan hubungi admin."},
-                        status=403
-                    )
+        # 🔹 Signed role cookie (tidak bisa diubah user)
+        # signed_role = signing.dumps("staff", key="b8f9a2c1d3e4f567890abcdef1234567890abcdef1234567890abcdef12345678")
 
-                user_data = {
-                    "id": user.id,
-                    "username": user.username,
-                    "email": user.email,
-                }
+        # 🔹 Set HttpOnly cookies
+        res.set_cookie(
+            key="access_token",
+            value=access_token,
+            httponly=True,
+            secure=False,  # ganti True di production
+            samesite="Lax",
+            max_age=60 * 60,  # 1 jam
+        )
+        res.set_cookie(
+            key="refresh_token",
+            value=refresh_token,
+            httponly=True,
+            secure=False,
+            samesite="Lax",
+            max_age=7 * 24 * 60 * 60,  # 7 hari
+        )
+        # res.set_cookie(
+        #     key="role",
+        #     value=signed_role,
+        #     httponly=True,
+        #     secure=False,
+        #     samesite="Lax",
+        #     max_age=60 * 60,
+        # )
 
-            except AccessToken.DoesNotExist:
-                return JsonResponse({"error": "Invalid access token"}, status=401)
-
-            # Buat response dengan set-cookie dan data user
-            res = JsonResponse(
-                {
-                    "message": "Login success",
-                    "user": user_data,
-                }
-            )
-            res.set_cookie(
-                "access_token",
-                access_token_str,
-                httponly=True,
-                secure=False,
-                samesite="Lax",
-            )
-            res.set_cookie(
-                "refresh_token",
-                refresh_token,
-                httponly=True,
-                secure=False,
-                samesite="Lax",
-            )
-            return res
-
-        return JsonResponse(data, status=response.status_code)
-@permission_classes([AllowAny])
-class StaffLoginView(TokenView):
-    @method_decorator(csrf_exempt)
-    def dispatch(self, *args, **kwargs):
-        return super().dispatch(*args, **kwargs)
-
-    def post(self, request, *args, **kwargs):
-        # Panggil method TokenView post (token exchange)
-        response = super().post(request, *args, **kwargs)
-
-        try:
-            data = json.loads(response.content)
-        except json.JSONDecodeError:
-            return JsonResponse(
-                {"error": "Invalid response from token endpoint"}, status=500
-            )
-
-        if response.status_code == 200:
-            access_token_str = data.get("access_token")
-            refresh_token = data.get("refresh_token")
-
-            try:
-                token = AccessToken.objects.select_related("user").get(
-                    token=access_token_str,
-                    expires__gt=datetime.now(),
-                )
-                user = token.user
-
-                # ✅ Cek apakah user staff
-                if not user.is_staff:
-                    return JsonResponse(
-                        {"error": "Login hanya diperbolehkan untuk staff."},
-                        status=403
-                    )
-
-                # ✅ Cek juga apakah user aktif
-                if not user.is_active:
-                    return JsonResponse(
-                        {"error": "Akun ini tidak aktif, silakan hubungi admin."},
-                        status=403
-                    )
-
-                user_data = {
-                    "id": user.id,
-                    "username": user.username,
-                    "email": user.email,
-                    "is_staff": user.is_staff,
-                }
-
-            except AccessToken.DoesNotExist:
-                return JsonResponse({"error": "Invalid access token"}, status=401)
-
-            # Buat response dengan set-cookie dan data user
-            res = JsonResponse(
-                {
-                    "message": "Login success (staff only)",
-                    "user": user_data,
-                }
-            )
-            res.set_cookie(
-                "access_token",
-                access_token_str,
-                httponly=True,
-                secure=False,
-                samesite="Lax",
-            )
-            res.set_cookie(
-                "refresh_token",
-                refresh_token,
-                httponly=True,
-                secure=False,
-                samesite="Lax",
-            )
-            return res
-
-        return JsonResponse(data, status=response.status_code)
+        return res

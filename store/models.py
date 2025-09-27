@@ -2,9 +2,13 @@ from django.db import models
 from django.contrib.auth.models import User
 
 # 1️⃣ MODEL PRODUK DASAR
+
+
 class Product(models.Model):
     name = models.CharField(max_length=100)
-    description = models.TextField()
+    description = models.TextField(default="")
+    tokopedia_link = models.TextField(default="")
+    shopee_link = models.TextField()
     price = models.DecimalField(max_digits=10, decimal_places=2)
     slug = models.SlugField(max_length=120, unique=True, blank=True, null=True)
 
@@ -14,8 +18,9 @@ class Product(models.Model):
 
 # 2️⃣ MODEL GAMBAR PRODUK
 class ProductImage(models.Model):
-    product = models.ForeignKey(Product, related_name='images', on_delete=models.CASCADE)
-    image = models.ImageField(upload_to='images/')
+    product = models.ForeignKey(
+        Product, related_name='images', on_delete=models.CASCADE)
+    image = models.ImageField(upload_to='images')
 
     def __str__(self):
         return f"{self.product.name} Image"

@@ -24,14 +24,15 @@ BASE_URL = "https://open-api.tiktokglobalshop.com"
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-
+from rest_framework.permissions import IsAuthenticated
 from .serializers import TrackQuerySerializer
 from .binderbyte import BinderbyteClient, BinderbyteError
 from .courier_map import to_binderbyte_code
-
+from rest_framework.decorators import api_view, permission_classes
+from users.permissions import IsStaffUser
 class TrackBinderbyteView(APIView):
     authentication_classes = []  
-    permission_classes = []      
+    permission_classes = [IsAuthenticated, IsStaffUser]    
 
     def get(self, request):
         serializer = TrackQuerySerializer(data=request.query_params)
@@ -49,12 +50,6 @@ class TrackBinderbyteView(APIView):
 
 
 def generate_sign(request_option, app_secret):
-    """
-    Generate HMAC-SHA256 signature
-    :param request_option: Request options dictionary containing qs (query params), uri (path), headers, body etc.
-    :param app_secret: Secret key for signing
-    :return: Hexadecimal signature string
-    """
     # Step 1: Extract and filter query parameters, exclude "access_token" and "sign", sort alphabetically
     params = request_option.get("qs", {})
     exclude_keys = ["access_token", "sign"]
@@ -91,7 +86,8 @@ def generate_sign(request_option, app_secret):
     return sign
 
 
-
+@api_view(["GET"]) 
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_auth_shop(request):
     ACCESS_TOKEN = get_valid_access_token()
     path = "/authorization/202309/shops"
@@ -124,6 +120,8 @@ def get_auth_shop(request):
     return JsonResponse(response.json())
 
 @csrf_exempt
+@api_view(["GET"]) 
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_orders_list(request,cipher):
     ACCESS_TOKEN = get_valid_access_token()
     path = "/order/202309/orders/search"
@@ -161,6 +159,8 @@ def get_orders_list(request,cipher):
     return JsonResponse(response.json())
 
 @csrf_exempt
+@api_view(["GET"]) 
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_product(request,cipher,id):
     ACCESS_TOKEN = get_valid_access_token()
     path = f'/product/202309/products/{id}'
@@ -194,12 +194,14 @@ def get_product(request,cipher,id):
     return JsonResponse(response.json())
 
 @csrf_exempt
+@api_view(["GET"]) 
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_orders_return(request,cipher):
     ACCESS_TOKEN = get_valid_access_token()
     path = "/return_refund/202309/returns/search"
     timestamp = int(time.time())
     page_token = request.GET.get("page_token", "")
-    page_size = request.GET.get("page_size", "3")  # default 10
+    page_size = request.GET.get("page_size", "10")  # default 10
     params = {
         "app_key": TIKTOK_APP_KEY,
         "timestamp": timestamp,
@@ -231,6 +233,8 @@ def get_orders_return(request,cipher):
     return JsonResponse(response.json())
 
 @csrf_exempt
+@api_view(["GET"]) 
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_shop_performance(request,cipher):
     ACCESS_TOKEN = get_valid_access_token()
     path = "/analytics/202405/shop/performance"
@@ -270,6 +274,8 @@ def get_shop_performance(request,cipher):
     return JsonResponse(response.json())
 
 @csrf_exempt
+@api_view(["GET"]) 
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_shop_product_performance(request,cipher):
     ACCESS_TOKEN = get_valid_access_token()
     path = "/analytics/202405/shop_products/performance"
