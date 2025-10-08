@@ -54,7 +54,7 @@ INSTALLED_APPS = [
     "store",
     "tiktok",
     "shopee",
-    
+
     # third-party
     "oauth2_provider",
     "django_extensions",
@@ -83,6 +83,12 @@ REST_FRAMEWORK = {
         "oauth2_provider.contrib.rest_framework.OAuth2Authentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
+    "DEFAULT_PAGINATION_CLASS": "store.utils.pagination.CustomPagination",
+    "PAGE_SIZE": 10,  # default 10 item per halaman
+    "DEFAULT_FILTER_BACKENDS": [
+        "rest_framework.filters.SearchFilter",
+        "rest_framework.filters.OrderingFilter",
+    ],
 }
 # Supaya dj-rest-auth tidak maksa pakai token bawaan
 REST_AUTH_TOKEN_MODEL = None
@@ -168,4 +174,4 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR,"media/")
+MEDIA_ROOT = os.path.join(BASE_DIR, "media/")

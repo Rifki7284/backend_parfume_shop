@@ -94,92 +94,6 @@ def get_product_list(request):
         return JsonResponse({"error": str(e)}, status=500)
 
 
-def get_total_orders_and_buyers(request):
-    try:
-        time_from = request.GET.get("start_date_ge", "")
-        time_to = request.GET.get("end_date_lt", "")
-
-        token = get_token()
-        timest = int(time.time())
-        path = "/api/v2/order/get_order_list"
-        sign = generate_sign_public(path, timest, token.access_token)
-
-        url = f"{host}{path}?partner_id={partner_id}&timestamp={timest}&access_token={token.access_token}&shop_id={shop_id}&sign={sign}"
-
-        total_orders = 0
-        buyers = set()
-        order_sns = []  # simpan order_sn untuk ambil detail
-        cursor = None
-        page_size = 100
-
-        # --- Ambil semua order ---
-        while True:
-            params = {
-                "time_range_field": "create_time",
-                "time_from": time_from,
-                "time_to": time_to,
-                "page_size": page_size,
-            }
-            if cursor:
-                params["cursor"] = cursor
-
-            resp = requests.get(url, params=params, timeout=20)
-            data = resp.json()
-
-            orders = data.get("response", {}).get("order_list", [])
-            total_orders += len(orders)
-
-            for order in orders:
-                buyers.add(order.get("buyer_user_id"))
-                order_sn = order.get("order_sn")
-                if order_sn:
-                    order_sns.append(order_sn)
-
-            if not data.get("response", {}).get("more"):
-                break
-            cursor = data.get("response", {}).get("next_cursor")
-
-        # --- Ambil detail order ---
-        total_gmv = 0
-        total_items_sold = 0
-        path_detail = "/api/v2/order/get_order_detail"
-
-        for i in range(0, len(order_sns), 50):
-            chunk = order_sns[i:i+50]
-            timest = int(time.time())
-            sign_detail = generate_sign_public(path_detail, timest, token.access_token)
-            url_detail = f"{host}{path_detail}?partner_id={partner_id}&timestamp={timest}&access_token={token.access_token}&shop_id={shop_id}&sign={sign_detail}"
-            resp_detail = requests.post(url_detail, json={"order_sn_list": chunk}, timeout=30)
-            data_detail = resp_detail.json()
-
-            order_list = data_detail.get("response", {}).get("order_list", [])
-            for od in order_list:
-                total_gmv += int(od.get("total_amount", 0))
-                for item in od.get("item_list", []):
-                    total_items_sold += int(item.get("model_quantity_purchased", 0))
-
-        # --- Sesuaikan response untuk TS ---
-        response = {
-            "data": {
-                "performance": {
-                    "intervals": [
-                        {
-                            "orders": total_orders,
-                            "gmv": {"amount": total_gmv},
-                            "units_sold": total_items_sold,
-                            "buyers": len(buyers)
-                        }
-                    ]
-                }
-            }
-        }
-
-        return JsonResponse(response)
-
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
-
-
 def get_product_info(request):
     try:
         now = datetime.datetime.now()
@@ -255,146 +169,736 @@ def _get_sold_count(extra_item):
 
 def get_top_products(request):
     try:
-        now = datetime.datetime.now()
-        token = get_token()  # asumsi ada helper ini
-        # --- Step 1: ambil semua item_id dari get_item_list ---
-        path_list = "/api/v2/product/get_item_list"
+        token = get_token()
         timest = int(time.time())
-        sign_list = generate_sign_public(path_list, timest, token.access_token)
-        url_list = f"{host}{path_list}?partner_id={partner_id}&timestamp={timest}&access_token={token.access_token}&shop_id={shop_id}&sign={sign_list}"
 
-        all_item_ids = []
-        offset = 0
-        page_size = 50  # sesuaikan / naikkan kalau API memperbolehkan
+        # === Base info ===
+        list_path = "/api/v2/order/get_order_list"
+        list_sign = generate_sign_public(list_path, timest, token.access_token)
+        list_url = (
+            f"{host}{list_path}?partner_id={partner_id}"
+            f"&timestamp={timest}&access_token={token.access_token}"
+            f"&shop_id={shop_id}&sign={list_sign}"
+        )
 
-        while True:
-            params_list = {
-                "offset": offset,
+        detail_path = "/api/v2/order/get_order_detail"
+        detail_sign = generate_sign_public(
+            detail_path, timest, token.access_token)
+        detail_url = (
+            f"{host}{detail_path}?partner_id={partner_id}"
+            f"&timestamp={timest}&access_token={token.access_token}"
+            f"&shop_id={shop_id}&sign={detail_sign}"
+        )
+
+        page_size = 100
+        now = datetime.datetime.now()
+
+        # === Helper: awal & akhir bulan ===
+        def get_month_range(dt: datetime.datetime):
+            start = datetime.datetime(dt.year, dt.month, 1)
+            next_month = datetime.datetime(
+                dt.year + (dt.month // 12), ((dt.month % 12) + 1), 1
+            )
+            end = next_month - datetime.timedelta(seconds=1)
+            return start, end
+
+        # === Helper: fetch SNs dalam range (max 15 hari sekali) ===
+        def fetch_orders_in_range(start_time, end_time):
+            all_orders = []
+            cursor = ""
+            params = {
+                "time_range_field": "create_time",
+                "time_from": int(start_time.timestamp()),
+                "time_to": int(end_time.timestamp()),
                 "page_size": page_size,
-                "item_status": ["NORMAL"]
             }
-            resp_list = requests.get(url_list, params=params_list, timeout=20)
-            data_list = resp_list.json()
-            items = data_list.get("response", {}).get("item", [])
-            all_item_ids.extend([it["item_id"] for it in items])
 
-            if not data_list.get("response", {}).get("has_next_page", False):
-                break
-            offset += page_size
+            while True:
+                if cursor:
+                    params["cursor"] = cursor
 
-        if not all_item_ids:
-            return JsonResponse({"top_products": []}, safe=False)
+                resp = requests.get(list_url, params=params, timeout=20)
+                data = resp.json()
 
-        # --- Step 2: ambil get_item_extra_info (batched) ---
-        path_extra = "/api/v2/product/get_item_extra_info"
-        extra_items = []
-        batch_size = 50  # pastikan sesuai limit API
-        for chunk in chunked(all_item_ids, batch_size):
-            timest = int(time.time())
-            sign_extra = generate_sign_public(
-                path_extra, timest, token.access_token)
-            url_extra = f"{host}{path_extra}?partner_id={partner_id}&timestamp={timest}&access_token={token.access_token}&shop_id={shop_id}&sign={sign_extra}"
-            resp_extra = requests.get(
-                url_extra, params={"item_id_list": chunk}, timeout=20)
-            data_extra = resp_extra.json()
-            extra_items.extend(data_extra.get(
-                "response", {}).get("item_list", []))
+                orders = data.get("response", {}).get("order_list", [])
+                all_orders.extend([o["order_sn"] for o in orders])
 
-        # --- Step 3: hitung sold, sort, ambil top N ---
-        for it in extra_items:
-            it["_sold_count"] = _get_sold_count(it)
+                more = data.get("response", {}).get("more", False)
+                cursor = data.get("response", {}).get("next_cursor", "")
 
-        top_n = 5
-        extra_items_sorted = sorted(
-            extra_items, key=lambda x: x["_sold_count"], reverse=True)
-        top_items = extra_items_sorted[:top_n]
-        top_ids = [it["item_id"] for it in top_items]
+                if not more or not cursor:
+                    break
 
-        # --- Step 4: panggil get_item_base_info untuk top_ids dan gabungkan nama ---
-        path_base = "/api/v2/product/get_item_base_info"
-        base_info_list = []
-        for chunk in chunked(top_ids, batch_size):
-            timest = int(time.time())
-            sign_base = generate_sign_public(
-                path_base, timest, token.access_token)
-            url_base = f"{host}{path_base}?partner_id={partner_id}&timestamp={timest}&access_token={token.access_token}&shop_id={shop_id}&sign={sign_base}"
-            resp_base = requests.get(
-                url_base, params={"item_id_list": chunk}, timeout=20)
-            data_base = resp_base.json()
-            base_info_list.extend(data_base.get(
-                "response", {}).get("item_list", []))
+            return all_orders
 
-        id_to_name = {p["item_id"]: p.get("item_name") for p in base_info_list}
+        # === Helper: full month (split 15 hari) ===
+        def fetch_full_month(start_month, end_month):
+            all_orders = []
+            temp_start = start_month
+            while temp_start < end_month:
+                temp_end = min(
+                    temp_start + datetime.timedelta(days=15), end_month)
+                all_orders.extend(fetch_orders_in_range(temp_start, temp_end))
+                temp_start = temp_end
+            return all_orders
 
-        # --- Final: gabungkan dan return hanya name + sold (plus item_id opsional) ---
-        result = []
-        for it in top_items:
-            iid = it.get("item_id")
-            result.append({
-                "item_id": iid,
-                "name": id_to_name.get(iid, None),
-                "sold": it.get("_sold_count", 0)
-            })
+        # === Helper: fetch detail order (batch 50) + hitung per produk ===
+        def fetch_top_products(order_sns):
+            product_sales = {}
+            for i in range(0, len(order_sns), 50):
+                batch = order_sns[i:i+50]
+                payload = {
+                    "order_sn_list": ",".join(batch),
+                    "response_optional_fields": "item_list,order_status",
+                }
+                resp = requests.get(detail_url, params=payload, timeout=20)
+                data = resp.json()
+                order_list = data.get("response", {}).get("order_list", [])
 
-        return JsonResponse({"top_products": result}, safe=False)
+                for order in order_list:
+                    if order.get("order_status") == "CANCELLED":
+                        continue
+                    for item in order.get("item_list", []):
+                        item_id = item.get("item_id")
+                        name = item.get("item_name")
+                        qty = item.get("model_quantity_purchased", 0)
+
+                        if item_id not in product_sales:
+                            product_sales[item_id] = {
+                                "name": name,
+                                "sold": 0
+                            }
+                        product_sales[item_id]["sold"] += qty
+
+            # urutkan berdasarkan sold
+            sorted_products = sorted(
+                product_sales.values(),
+                key=lambda x: x["sold"],
+                reverse=True
+            )[:5]
+
+            return sorted_products
+
+        # Bulan ini
+        this_start, this_end = get_month_range(now)
+        this_month_sns = fetch_full_month(this_start, this_end)
+        top_this_month = fetch_top_products(this_month_sns)
+
+        return JsonResponse(
+            top_this_month, safe=False)
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
 
-def get_total_sold_this_month(request):
+def fetch_orders_in_range(start_time, end_time, token, path, url_base, page_size=100):
+    """Helper untuk fetch order dengan pagination Shopee."""
+    total_orders = 0
+    cursor = ""
+    params = {
+        "time_range_field": "create_time",
+        "time_from": int(start_time.timestamp()),
+        "time_to": int(end_time.timestamp()),
+        "page_size": page_size,
+    }
+
+    while True:
+        if cursor:
+            params["cursor"] = cursor
+        else:
+            params.pop("cursor", None)
+
+        resp = requests.get(url_base, params=params, timeout=20)
+        data = resp.json()
+
+        order_list = data.get("response", {}).get("order_list", [])
+        total_orders += len(order_list)
+
+        response_meta = data.get("response", {})
+        if response_meta.get("more") and response_meta.get("next_cursor"):
+            cursor = response_meta["next_cursor"]
+        else:
+            break
+
+    return total_orders
+
+
+def get_month_date_ranges(year, month):
+    """Bagi 1 bulan jadi beberapa range 15 hari."""
+    first_day = datetime.datetime(year, month, 1)
+    if month == 12:
+        next_month = datetime.datetime(year + 1, 1, 1)
+    else:
+        next_month = datetime.datetime(year, month + 1, 1)
+
+    ranges = []
+    current_start = first_day
+    while current_start < next_month:
+        current_end = min(
+            current_start + datetime.timedelta(days=15), next_month)
+        ranges.append((current_start, current_end))
+        current_start = current_end
+    return ranges
+
+
+def get_total_orders_month(request):
+    try:
+        # --- Token & Signing
+        token = get_token()
+        timest = int(time.time())
+        path = "/api/v2/order/get_order_list"
+        sign = generate_sign_public(path, timest, token.access_token)
+        url_base = f"{host}{path}?partner_id={partner_id}&timestamp={timest}&access_token={token.access_token}&shop_id={shop_id}&sign={sign}"
+
+        now = datetime.datetime.now()
+
+        # bulan ini
+        this_month_year = now.year
+        this_month = now.month
+        this_month_ranges = get_month_date_ranges(this_month_year, this_month)
+
+        total_this_month = 0
+        for start, end in this_month_ranges:
+            total_this_month += fetch_orders_in_range(
+                start, end, token, path, url_base)
+
+        # bulan lalu
+        last_month_date = (now.replace(day=1) - datetime.timedelta(days=1))
+        last_month_year = last_month_date.year
+        last_month = last_month_date.month
+        last_month_ranges = get_month_date_ranges(last_month_year, last_month)
+
+        total_last_month = 0
+        for start, end in last_month_ranges:
+            total_last_month += fetch_orders_in_range(
+                start, end, token, path, url_base)
+
+        return JsonResponse({
+            "total_orders_this_month": total_this_month,
+            "total_orders_last_month": total_last_month,
+        })
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def get_shopee_orders_year(request):
     try:
         token = get_token()
-        # --- Step 1: ambil semua item_id dari get_item_list ---
-        path_list = "/api/v2/product/get_item_list"
         timest = int(time.time())
-        sign_list = generate_sign_public(path_list, timest, token.access_token)
-        url_list = f"{host}{path_list}?partner_id={partner_id}&timestamp={timest}&access_token={token.access_token}&shop_id={shop_id}&sign={sign_list}"
+        path = "/api/v2/order/get_order_list"
+        sign = generate_sign_public(path, timest, token.access_token)
+        url_base = f"{host}{path}?partner_id={partner_id}&timestamp={timest}&access_token={token.access_token}&shop_id={shop_id}&sign={sign}"
 
-        all_item_ids = []
-        offset = 0
-        page_size = 50
+        now = datetime.datetime.now()
+        year = now.year
 
-        while True:
-            params_list = {
-                "offset": offset,
+        # Jan–Des
+        sales_data = {}
+
+        for month in range(1, 13):
+            month_ranges = get_month_date_ranges(year, month)
+
+            total_orders = 0
+            for start, end in month_ranges:
+                total_orders += fetch_orders_in_range(
+                    start, end, token, path, url_base
+                )
+
+            # simpan ke dict dengan key angka bulan
+            sales_data[month] = total_orders
+
+        return JsonResponse(sales_data)
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def get_total_customers(request):
+    try:
+        token = get_token()
+        timest = int(time.time())
+
+        # === Base info ===
+        list_path = "/api/v2/order/get_order_list"
+        list_sign = generate_sign_public(list_path, timest, token.access_token)
+        list_url = (
+            f"{host}{list_path}?partner_id={partner_id}"
+            f"&timestamp={timest}&access_token={token.access_token}"
+            f"&shop_id={shop_id}&sign={list_sign}"
+        )
+
+        detail_path = "/api/v2/order/get_order_detail"
+        detail_sign = generate_sign_public(
+            detail_path, timest, token.access_token)
+        detail_url = (
+            f"{host}{detail_path}?partner_id={partner_id}"
+            f"&timestamp={timest}&access_token={token.access_token}"
+            f"&shop_id={shop_id}&sign={detail_sign}"
+        )
+
+        page_size = 100
+        now = datetime.datetime.now()
+
+        # === Helper: awal & akhir bulan ===
+        def get_month_range(dt: datetime.datetime):
+            start = datetime.datetime(dt.year, dt.month, 1)
+            next_month = datetime.datetime(
+                dt.year + (dt.month // 12), ((dt.month % 12) + 1), 1
+            )
+            end = next_month - datetime.timedelta(seconds=1)
+            return start, end
+
+        # === Helper: fetch SNs dalam range (max 15 hari sekali) ===
+        def fetch_orders_in_range(start_time, end_time):
+            all_orders = []
+            cursor = ""
+            params = {
+                "time_range_field": "create_time",
+                "time_from": int(start_time.timestamp()),
+                "time_to": int(end_time.timestamp()),
                 "page_size": page_size,
-                "item_status": ["NORMAL"]
             }
-            resp_list = requests.get(url_list, params=params_list, timeout=20)
-            data_list = resp_list.json()
-            items = data_list.get("response", {}).get("item", [])
-            all_item_ids.extend([it["item_id"] for it in items])
 
-            if not data_list.get("response", {}).get("has_next_page", False):
-                break
-            offset += page_size
+            while True:
+                if cursor:
+                    params["cursor"] = cursor
 
-        if not all_item_ids:
-            return JsonResponse({"total_sold_this_month": 0}, safe=False)
+                resp = requests.get(list_url, params=params, timeout=20)
+                data = resp.json()
 
-        # --- Step 2: ambil get_item_extra_info (batched) ---
-        path_extra = "/api/v2/product/get_item_extra_info"
-        total_sold = 0
-        batch_size = 50
+                orders = data.get("response", {}).get("order_list", [])
+                all_orders.extend([o["order_sn"] for o in orders])
 
-        for i in range(0, len(all_item_ids), batch_size):
-            chunk = all_item_ids[i:i + batch_size]
-            timest = int(time.time())
-            sign_extra = generate_sign_public(
-                path_extra, timest, token.access_token)
-            url_extra = f"{host}{path_extra}?partner_id={partner_id}&timestamp={timest}&access_token={token.access_token}&shop_id={shop_id}&sign={sign_extra}"
+                more = data.get("response", {}).get("more", False)
+                cursor = data.get("response", {}).get("next_cursor", "")
 
-            resp_extra = requests.get(
-                url_extra, params={"item_id_list": chunk}, timeout=20)
-            data_extra = resp_extra.json()
-            item_list = data_extra.get("response", {}).get("item_list", [])
+                if not more or not cursor:
+                    break
 
-            for item in item_list:
-                # pakai field sold_30_days (kalau ada), fallback ke 0
-                total_sold += int(item.get("sold_30_days", 0))
+            return all_orders
 
-        return JsonResponse({"total_sold_this_month": total_sold}, safe=False)
+        # === Helper: fetch full month (split 15 hari) ===
+        def fetch_full_month(start_month, end_month):
+            all_orders = []
+            temp_start = start_month
+            while temp_start < end_month:
+                temp_end = min(
+                    temp_start + datetime.timedelta(days=15), end_month)
+                all_orders.extend(fetch_orders_in_range(temp_start, temp_end))
+                temp_start = temp_end
+            return all_orders
+
+        # === Helper: fetch buyers (duplikat dihitung) ===
+        def fetch_buyers(order_sns):
+            buyers = []
+            for i in range(0, len(order_sns), 50):
+                batch = order_sns[i:i+50]
+                payload = {
+                    "order_sn_list": ",".join(batch),
+                    "response_optional_fields": "buyer_user_id,order_status",
+                }
+                resp = requests.get(detail_url, params=payload, timeout=20)
+                data = resp.json()
+                order_list = data.get("response", {}).get("order_list", [])
+
+                for order in order_list:
+                    if order.get("order_status") == "CANCELLED":
+                        continue
+                    buyer_id = order.get("buyer_user_id")
+                    if buyer_id:
+                        buyers.append(buyer_id)  # simpan duplikat
+
+            return buyers
+
+        # Bulan ini
+        this_start, this_end = get_month_range(now)
+        this_month_sns = fetch_full_month(this_start, this_end)
+        this_month_buyers = fetch_buyers(this_month_sns)
+
+        # Bulan lalu
+        last_month_ref = this_start - datetime.timedelta(days=1)
+        last_start, last_end = get_month_range(last_month_ref)
+        last_month_sns = fetch_full_month(last_start, last_end)
+        last_month_buyers = fetch_buyers(last_month_sns)
+
+        return JsonResponse({
+            "this_month_customers": len(this_month_buyers),
+            "last_month_customers": len(last_month_buyers),
+        }, safe=False)
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def get_total_sold(request):
+    try:
+        token = get_token()
+        timest = int(time.time())
+
+        # === Base info ===
+        list_path = "/api/v2/order/get_order_list"
+        list_sign = generate_sign_public(list_path, timest, token.access_token)
+        list_url = (
+            f"{host}{list_path}?partner_id={partner_id}"
+            f"&timestamp={timest}&access_token={token.access_token}"
+            f"&shop_id={shop_id}&sign={list_sign}"
+        )
+
+        detail_path = "/api/v2/order/get_order_detail"
+        detail_sign = generate_sign_public(
+            detail_path, timest, token.access_token)
+        detail_url = (
+            f"{host}{detail_path}?partner_id={partner_id}"
+            f"&timestamp={timest}&access_token={token.access_token}"
+            f"&shop_id={shop_id}&sign={detail_sign}"
+        )
+
+        page_size = 100
+        now = datetime.datetime.now()
+
+        # === Helper: awal & akhir bulan ===
+        def get_month_range(dt: datetime.datetime):
+            start = datetime.datetime(dt.year, dt.month, 1)
+            next_month = datetime.datetime(
+                dt.year + (dt.month // 12), ((dt.month % 12) + 1), 1
+            )
+            end = next_month - datetime.timedelta(seconds=1)
+            return start, end
+
+        # === Helper: fetch SNs dalam range (max 15 hari sekali) ===
+        def fetch_orders_in_range(start_time, end_time):
+            all_orders = []
+            cursor = ""
+            params = {
+                "time_range_field": "create_time",
+                "time_from": int(start_time.timestamp()),
+                "time_to": int(end_time.timestamp()),
+                "page_size": page_size,
+            }
+
+            while True:
+                if cursor:
+                    params["cursor"] = cursor
+
+                resp = requests.get(list_url, params=params, timeout=20)
+                data = resp.json()
+
+                orders = data.get("response", {}).get("order_list", [])
+                all_orders.extend([o["order_sn"] for o in orders])
+
+                more = data.get("response", {}).get("more", False)
+                cursor = data.get("response", {}).get("next_cursor", "")
+
+                if not more or not cursor:
+                    break
+
+            return all_orders
+
+        # === Helper: full month (split 15 hari) ===
+        def fetch_full_month(start_month, end_month):
+            all_orders = []
+            temp_start = start_month
+            while temp_start < end_month:
+                temp_end = min(
+                    temp_start + datetime.timedelta(days=15), end_month)
+                all_orders.extend(fetch_orders_in_range(temp_start, temp_end))
+                temp_start = temp_end
+            return all_orders
+
+        # === Helper: fetch detail order (batch 50) + hitung total sold ===
+        def fetch_total_sold(order_sns):
+            total_sold = 0
+            for i in range(0, len(order_sns), 50):
+                batch = order_sns[i:i+50]
+                payload = {
+                    "order_sn_list": ",".join(batch),
+                    "response_optional_fields": "item_list,order_status",
+                }
+                resp = requests.get(detail_url, params=payload, timeout=20)
+                data = resp.json()
+                order_list = data.get("response", {}).get("order_list", [])
+
+                for order in order_list:
+                    # Skip jika order cancelled
+                    if order.get("order_status") == "CANCELLED":
+                        continue
+                    for item in order.get("item_list", []):
+                        total_sold += item.get("model_quantity_purchased", 0)
+
+            return total_sold
+
+        # Bulan ini
+        this_start, this_end = get_month_range(now)
+        this_month_sns = fetch_full_month(this_start, this_end)
+        this_month_sold = fetch_total_sold(this_month_sns)
+
+        # Bulan lalu
+        last_month_ref = this_start - datetime.timedelta(days=1)
+        last_start, last_end = get_month_range(last_month_ref)
+        last_month_sns = fetch_full_month(last_start, last_end)
+        last_month_sold = fetch_total_sold(last_month_sns)
+
+        return JsonResponse({
+            "this_month_sold": this_month_sold,
+            "last_month_sold": last_month_sold,
+        }, safe=False)
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def get_total_gmv(request):
+    try:
+        token = get_token()
+        timest = int(time.time())
+
+        # === Base info ===
+        list_path = "/api/v2/order/get_order_list"
+        list_sign = generate_sign_public(list_path, timest, token.access_token)
+        list_url = (
+            f"{host}{list_path}?partner_id={partner_id}"
+            f"&timestamp={timest}&access_token={token.access_token}"
+            f"&shop_id={shop_id}&sign={list_sign}"
+        )
+
+        detail_path = "/api/v2/order/get_order_detail"
+        detail_sign = generate_sign_public(
+            detail_path, timest, token.access_token)
+        detail_url = (
+            f"{host}{detail_path}?partner_id={partner_id}"
+            f"&timestamp={timest}&access_token={token.access_token}"
+            f"&shop_id={shop_id}&sign={detail_sign}"
+        )
+
+        page_size = 100
+        now = datetime.datetime.now()
+
+        # === Helper: awal & akhir bulan ===
+        def get_month_range(dt: datetime.datetime):
+            start = datetime.datetime(dt.year, dt.month, 1)
+            next_month = datetime.datetime(
+                dt.year + (dt.month // 12), ((dt.month % 12) + 1), 1
+            )
+            end = next_month - datetime.timedelta(seconds=1)
+            return start, end
+
+        # === Helper: fetch SNs dalam range (max 15 hari sekali) ===
+        def fetch_orders_in_range(start_time, end_time):
+            all_orders = []
+            cursor = ""
+            params = {
+                "time_range_field": "create_time",
+                "time_from": int(start_time.timestamp()),
+                "time_to": int(end_time.timestamp()),
+                "page_size": page_size,
+            }
+
+            while True:
+                if cursor:
+                    params["cursor"] = cursor
+
+                resp = requests.get(list_url, params=params, timeout=20)
+                data = resp.json()
+
+                orders = data.get("response", {}).get("order_list", [])
+                all_orders.extend([o["order_sn"] for o in orders])
+
+                more = data.get("response", {}).get("more", False)
+                cursor = data.get("response", {}).get("next_cursor", "")
+
+                if not more or not cursor:
+                    break
+
+            return all_orders
+
+        # === Helper: full month (split 15 hari) ===
+        def fetch_full_month(start_month, end_month):
+            all_orders = []
+            temp_start = start_month
+            while temp_start < end_month:
+                temp_end = min(
+                    temp_start + datetime.timedelta(days=15), end_month)
+                all_orders.extend(fetch_orders_in_range(temp_start, temp_end))
+                temp_start = temp_end
+            return all_orders
+
+        # === Helper: fetch detail order (batch 50) + hitung GMV ===
+        def fetch_total_gmv(order_sns):
+            gmv = 0
+            for i in range(0, len(order_sns), 50):
+                batch = order_sns[i:i+50]
+                payload = {
+                    "order_sn_list": ",".join(batch),
+                    "response_optional_fields": "item_list,order_status",
+                }
+                resp = requests.get(detail_url, params=payload, timeout=20)
+                data = resp.json()
+                order_list = data.get("response", {}).get("order_list", [])
+
+                for order in order_list:
+                    # Skip jika order cancelled
+                    if order.get("order_status") == "CANCELLED":
+                        continue
+                    for item in order.get("item_list", []):
+                        qty = item.get("model_quantity_purchased", 0)
+                        # pakai harga diskon
+                        price = float(item.get("model_discounted_price", 0))
+                        gmv += qty * price
+            return gmv
+
+        # Bulan ini
+        this_start, this_end = get_month_range(now)
+        this_month_sns = fetch_full_month(this_start, this_end)
+        this_month_gmv = fetch_total_gmv(this_month_sns)
+
+        # Bulan lalu
+        last_month_ref = this_start - datetime.timedelta(days=1)
+        last_start, last_end = get_month_range(last_month_ref)
+        last_month_sns = fetch_full_month(last_start, last_end)
+        last_month_gmv = fetch_total_gmv(last_month_sns)
+
+        return JsonResponse({
+            "this_month_gmv": this_month_gmv,
+            "last_month_gmv": last_month_gmv,
+        }, safe=False)
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def get_shopee_stats(request):
+    try:
+        token = get_token()
+        timest = int(time.time())
+
+        # === Base info ===
+        list_path = "/api/v2/order/get_order_list"
+        list_sign = generate_sign_public(list_path, timest, token.access_token)
+        list_url = (
+            f"{host}{list_path}?partner_id={partner_id}"
+            f"&timestamp={timest}&access_token={token.access_token}"
+            f"&shop_id={shop_id}&sign={list_sign}"
+        )
+
+        detail_path = "/api/v2/order/get_order_detail"
+        detail_sign = generate_sign_public(
+            detail_path, timest, token.access_token)
+        detail_url = (
+            f"{host}{detail_path}?partner_id={partner_id}"
+            f"&timestamp={timest}&access_token={token.access_token}"
+            f"&shop_id={shop_id}&sign={detail_sign}"
+        )
+
+        page_size = 100
+        now = datetime.datetime.now()
+
+        # === Helper: awal & akhir bulan ===
+        def get_month_range(dt: datetime.datetime):
+            start = datetime.datetime(dt.year, dt.month, 1)
+            next_month = datetime.datetime(
+                dt.year + (dt.month // 12), ((dt.month % 12) + 1), 1
+            )
+            end = next_month - datetime.timedelta(seconds=1)
+            return start, end
+
+        # === Helper: fetch order_sn dalam range (max 15 hari sekali) ===
+        def fetch_orders_in_range(start_time, end_time):
+            all_orders = []
+            cursor = ""
+            params = {
+                "time_range_field": "create_time",
+                "time_from": int(start_time.timestamp()),
+                "time_to": int(end_time.timestamp()),
+                "page_size": page_size,
+            }
+            while True:
+                if cursor:
+                    params["cursor"] = cursor
+
+                resp = requests.get(list_url, params=params, timeout=20)
+                data = resp.json()
+
+                orders = data.get("response", {}).get("order_list", [])
+                all_orders.extend([o["order_sn"] for o in orders])
+
+                more = data.get("response", {}).get("more", False)
+                cursor = data.get("response", {}).get("next_cursor", "")
+
+                if not more or not cursor:
+                    break
+            return all_orders
+
+        # === Helper: fetch full month (split 15 hari) ===
+        def fetch_full_month(start_month, end_month):
+            all_orders = []
+            temp_start = start_month
+            while temp_start < end_month:
+                temp_end = min(
+                    temp_start + datetime.timedelta(days=15), end_month)
+                all_orders.extend(fetch_orders_in_range(temp_start, temp_end))
+                temp_start = temp_end
+            return all_orders
+
+        # === Helper: fetch detail order (batch 50) ===
+        def fetch_order_details(order_sns):
+            details = []
+            for i in range(0, len(order_sns), 50):
+                batch = order_sns[i:i+50]
+                payload = {
+                    "order_sn_list": ",".join(batch),
+                    "response_optional_fields": "item_list,order_status,buyer_user_id",
+                }
+                resp = requests.get(detail_url, params=payload, timeout=20)
+                data = resp.json()
+                order_list = data.get("response", {}).get("order_list", [])
+                details.extend(order_list)
+            return details
+
+        # === Kalkulasi untuk 1 bulan (orders, customers, sold, gmv) ===
+        def calculate_stats(start, end):
+            order_sns = fetch_full_month(start, end)
+            details = fetch_order_details(order_sns)
+
+            total_orders = 0
+            buyers = []
+            total_sold = 0
+            gmv = 0
+
+            for order in details:
+                if order.get("order_status") == "CANCELLED":
+                    continue
+                total_orders += 1
+                buyer_id = order.get("buyer_user_id")
+                if buyer_id:
+                    buyers.append(buyer_id)
+                for item in order.get("item_list", []):
+                    qty = item.get("model_quantity_purchased", 0)
+                    # harga diskon
+                    price = float(item.get("model_discounted_price", 0))
+                    total_sold += qty
+                    gmv += qty * price
+
+            return {
+                "total_orders": total_orders,
+                "customers": len(buyers),  # duplikat dihitung
+                "sold": total_sold,
+                "gmv": gmv,
+            }
+
+        # Bulan ini
+        this_start, this_end = get_month_range(now)
+        this_stats = calculate_stats(this_start, this_end)
+
+        # Bulan lalu
+        last_month_ref = this_start - datetime.timedelta(days=1)
+        last_start, last_end = get_month_range(last_month_ref)
+        last_stats = calculate_stats(last_start, last_end)
+
+        return JsonResponse({
+            "this_month": this_stats,
+            "last_month": last_stats,
+        })
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
@@ -461,7 +965,8 @@ def get_order_list(request):
         url = f"{host}{path}?partner_id={partner_id}&timestamp={timest}&access_token={token.access_token}&shop_id={shop_id}&sign={sign}"
 
         cursor = request.GET.get("cursor", "")  # pagination cursor
-        page_size = int(request.GET.get("page_size", 20))
+        page_size = int(request.GET.get("page_size", 10))
+        status = request.GET.get("status", "")  # ✅ filter status (optional)
 
         now = datetime.datetime.now()
         end_time = now
@@ -473,8 +978,12 @@ def get_order_list(request):
             "time_to": int(end_time.timestamp()),
             "page_size": page_size,
         }
+
         if cursor:
             params["cursor"] = cursor
+
+        if status and status.lower() != "all":
+            params["order_status"] = status.upper()
 
         resp = requests.get(url, params=params, timeout=20)
         data = resp.json()
@@ -483,6 +992,7 @@ def get_order_list(request):
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+
 
 
 def get_order_detail(request):

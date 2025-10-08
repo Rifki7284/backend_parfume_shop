@@ -4,11 +4,15 @@ from . import views
 
 urlpatterns = [
     path("shop/info", views.Shop_info, name="shop_info"),
+    path("shop/total_gmv",views.get_total_gmv, name="shop_gmv"),
+    path("shop/performance",views.get_shopee_stats),
     path("products", views.get_product_info, name="product_list"),
     path("products/best/seller", views.get_top_products,
          name="product_best_seller"),
-    path("products/sold", views.get_total_orders_and_buyers, name="total_sold"),
-    
+    path("products/sold", views.get_total_sold, name="total_sold"),
+    path("customers/total",views.get_total_customers, name="total_customers"),
+    path("orders/total", views.get_total_orders_month, name="total_orders"),
+    path("orders/total/year",views.get_shopee_orders_year),
     path("orders", views.get_order_list, name="order_list"),
     path("orders/detail", views.get_order_detail, name="order_detail"),
     path("orders/tracking_number", views.get_tracking_number,
