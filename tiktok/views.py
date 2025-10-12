@@ -9,14 +9,18 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+import calendar
+from datetime import datetime, timedelta, timezone
+from collections import Counter
 import time
 import hmac
 import hashlib
 import requests
-from django.http import JsonResponse, HttpResponse
+from django.http import JsonResponse
 from django.shortcuts import redirect
 from django.conf import settings
 import hmac
+
 import hashlib
 from urllib.parse import urlparse
 import json
@@ -35,7 +39,7 @@ TIKTOK_APP_SECRET = str(settings.TIKTOK_APP_SECRET).strip()
 BASE_URL = "https://open-api.tiktokglobalshop.com"
 # tiktok/views.py
 
-
+@permission_classes([IsAuthenticated, IsStaffUser])
 class TrackBinderbyteView(APIView):
     authentication_classes = []
     permission_classes = [IsAuthenticated, IsStaffUser]
@@ -94,6 +98,7 @@ def generate_sign(request_option, app_secret):
     return sign
 
 
+@csrf_exempt
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsStaffUser])
 def get_auth_shop(request):
@@ -177,8 +182,9 @@ def get_orders_list(request, cipher):
 
     return JsonResponse(response.json())
 
-
-
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_top_products(request, cipher):
     ACCESS_TOKEN = get_valid_access_token()
     path = "/order/202309/orders/search"
@@ -187,40 +193,79 @@ def get_top_products(request, cipher):
     timestamp = int(time.time())
     page_size = 100
     page_token = ""
+    month = request.GET.get("month")
+    year = request.GET.get("year")
+
+    try:
+        if month and year:
+            month = int(month)
+            year = int(year)
+
+            # start: first day of month 00:00:00 UTC
+            start_date = datetime(year, month, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+            # last day of month at 23:59:59 UTC
+            last_day = calendar.monthrange(year, month)[1]
+            end_date = datetime(year, month, last_day, 23, 59, 59, tzinfo=timezone.utc)
+        else:
+            # default last 30 days (UTC)
+            end_date = datetime.now(timezone.utc)
+            start_date = end_date - timedelta(days=30)
+
+        create_time_ge = int(start_date.timestamp())
+        create_time_lt = int(end_date.timestamp())
+
+    except ValueError:
+        return JsonResponse({"error": "Invalid month/year format"}, status=400)
+
+    # debug: bantu verifikasi apa yang dikirim ke API
+    print("DEBUG create_time_ge:", datetime.fromtimestamp(create_time_ge, tz=timezone.utc))
+    print("DEBUG create_time_lt:", datetime.fromtimestamp(create_time_lt, tz=timezone.utc))
 
     all_orders = []
 
-    # === Ambil semua orders sampai habis ===
     while True:
+        # Param sistem (query string)
         params = {
             "app_key": TIKTOK_APP_KEY,
             "timestamp": timestamp,
-            "access_token": ACCESS_TOKEN,
             "page_size": page_size,
             "page_token": page_token,
             "shop_cipher": cipher,
-            "order_status": "COMPLETED",
         }
 
+        # Body JSON (filter + kondisi pencarian) -> kirim kedua batas waktu
+        payload = {
+            "order_status": "COMPLETED",
+            "create_time_ge": create_time_ge,
+            "create_time_lt": create_time_lt,
+        }
+
+        # Generate sign berdasarkan query + body (pastikan generate_sign mengikutkan body)
         request_option = {
             "qs": params,
             "uri": path,
-            "body": {},
+            "body": payload,
         }
-
         sign = generate_sign(request_option, TIKTOK_APP_SECRET)
         params["sign"] = sign
 
+        # Kirim POST request (body lewat json= so types preserved)
         response = requests.post(
             url,
             params=params,
             headers={
                 "Content-Type": "application/json",
                 "x-tts-access-token": ACCESS_TOKEN,
-            }
+            },
+            json=payload,
         )
 
-        data = response.json()
+        try:
+            data = response.json()
+        except ValueError:
+            return JsonResponse({"error": "Invalid JSON response from TikTok", "raw": response.text}, status=500)
+
         if data.get("code") != 0:
             return JsonResponse(data, status=400)
 
@@ -237,21 +282,16 @@ def get_top_products(request, cipher):
     product_counter = Counter()
 
     for order in all_orders:
-        line_items = order.get("line_items", [])
-        for item in line_items:
-            product_name = item.get("product_name", "Unknown Product")
-            qty = int(item.get("sku_count", 1)) if "sku_count" in item else 1
-            product_counter[product_name] += qty
+        for item in order.get("line_items", []):
+            name = item.get("product_name", "Unknown Product")
+            qty = int(item.get("sku_count", 1))
+            product_counter[name] += qty
 
     top_5 = product_counter.most_common(5)
-
-    # === Format sesuai keinginan ===
-    response_data = [
-        {"name": name, "sold": sold}
-        for name, sold in top_5
-    ]
+    response_data = [{"name": n, "sold": s} for n, s in top_5]
 
     return JsonResponse(response_data, safe=False)
+
 
 
 @csrf_exempt
@@ -372,15 +412,15 @@ def get_shop_performance(request, cipher):
     return JsonResponse(response.json())
 
 
-# @csrf_exempt
-# @api_view(["GET"])
-# @permission_classes([IsAuthenticated, IsStaffUser])
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_shop_performance_stats(request, cipher):
     ACCESS_TOKEN = get_valid_access_token()
     path = "/analytics/202405/shop/performance"
 
+    # === Helper: Convert TikTok interval JSON → MonthlyStats format ===
     def map_interval(interval):
-        """Convert TikTok interval JSON → MonthlyStats format"""
         return {
             "total_orders": interval.get("orders", 0),
             "customers": interval.get("buyers", 0),
@@ -388,8 +428,8 @@ def get_shop_performance_stats(request, cipher):
             "gmv": float(interval.get("gmv", {}).get("amount", 0.0)),
         }
 
+    # === Helper: Hit TikTok API for date range ===
     def fetch_stats(start_date, end_date_exclusive):
-        """Hit TikTok API for a specific date range"""
         timestamp = int(time.time())
         params = {
             "app_key": TIKTOK_APP_KEY,
@@ -433,7 +473,6 @@ def get_shop_performance_stats(request, cipher):
         # --- Debug log biar kelihatan isi response TikTok ---
         print("TikTok API Response:", res_json)
 
-        # ✅ cek kalau TikTok balikin error / kosong
         data = res_json.get("data")
         if not data or "performance" not in data:
             return {
@@ -453,29 +492,38 @@ def get_shop_performance_stats(request, cipher):
                 "gmv": 0.0,
             }
 
-        # Ambil interval pertama (TikTok biasanya 1 range penuh)
         return map_interval(intervals[0])
 
-    # === Tentukan periode waktu otomatis ===
-    today = datetime.today()
+    # === Ambil filter month & year dari query ===
+    try:
+        month = int(request.GET.get("month", datetime.today().month))
+        year = int(request.GET.get("year", datetime.today().year))
+    except ValueError:
+        return JsonResponse({"error": "Invalid month or year"}, status=400)
 
-    # --- This month ---
-    first_day_this_month = today.replace(day=1).strftime("%Y-%m-%d")
-    tomorrow_str = (today + timedelta(days=1)
-                    ).strftime("%Y-%m-%d")  # exclusive
+    # === Tentukan periode waktu berdasarkan filter ===
+    first_day = datetime(year, month, 1)
+    # bulan ini (berdasarkan filter)
+    first_day_this_month_str = first_day.strftime("%Y-%m-%d")
 
-    # --- Last month ---
-    first_day_last_month = (today.replace(
-        day=1) - timedelta(days=1)).replace(day=1)
-    last_day_last_month = today.replace(day=1) - timedelta(days=1)
+    # cari awal bulan berikutnya → untuk batas exclusive
+    if month == 12:
+        next_month = datetime(year + 1, 1, 1)
+    else:
+        next_month = datetime(year, month + 1, 1)
+    end_this_month_str = next_month.strftime("%Y-%m-%d")
+
+    # bulan lalu
+    last_month_date = first_day - timedelta(days=1)
+    first_day_last_month = last_month_date.replace(day=1)
     first_day_last_month_str = first_day_last_month.strftime("%Y-%m-%d")
-    end_last_month_str = (last_day_last_month +
-                          timedelta(days=1)).strftime("%Y-%m-%d")  # exclusive
+
+    # akhir bulan lalu (exclusive)
+    end_last_month_str = first_day.strftime("%Y-%m-%d")
 
     # === Hit API dua kali ===
-    this_month_stats = fetch_stats(first_day_this_month, tomorrow_str)
-    last_month_stats = fetch_stats(
-        first_day_last_month_str, end_last_month_str)
+    this_month_stats = fetch_stats(first_day_this_month_str, end_this_month_str)
+    last_month_stats = fetch_stats(first_day_last_month_str, end_last_month_str)
 
     result = {
         "this_month": this_month_stats,
@@ -485,6 +533,9 @@ def get_shop_performance_stats(request, cipher):
     return JsonResponse(result)
 
 
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_tiktok_orders_year(request, cipher):
     ACCESS_TOKEN = get_valid_access_token()
     path = "/analytics/202405/shop/performance"
@@ -540,10 +591,7 @@ def get_tiktok_orders_year(request, cipher):
             return {"total_orders": 0, "customers": 0, "sold": 0, "gmv": 0.0}
 
         return map_interval(intervals[0])
-
-    # === Loop semua bulan dalam tahun berjalan ===
-    now = datetime.today()
-    year = now.year
+    year = int(request.GET.get("year"))
     results = {}
 
     for month in range(1, 13):

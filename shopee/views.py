@@ -10,6 +10,8 @@ from django.conf import settings
 from shopee.models import ShopeeToken
 from django.views.decorators.csrf import csrf_exempt
 import os
+import datetime
+from collections import Counter
 from dotenv import load_dotenv
 from rest_framework.decorators import api_view, permission_classes
 from users.permissions import IsStaffUser
@@ -35,7 +37,9 @@ def get_token():
         raise ValueError("Shopee token not found")
     return token
 
-
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def Shop_info(request):
     try:
         token = get_token()
@@ -51,7 +55,9 @@ def Shop_info(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
-
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_product_list(request):
     try:
         now = datetime.datetime.now()
@@ -93,7 +99,9 @@ def get_product_list(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
-
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_product_info(request):
     try:
         now = datetime.datetime.now()
@@ -148,28 +156,12 @@ def chunked(iterable, size):
         yield iterable[i:i + size]
 
 
-def _get_sold_count(extra_item):
-    """
-    Coba beberapa nama field yang umum dipakai di extra_info.
-    Tambah key jika sandbox/production punya nama lain.
-    """
-    for k in ("historical_sold", "sold", "sales", "total_sold", "sold_count"):
-        v = extra_item.get(k)
-        if v is not None:
-            try:
-                return int(v)
-            except Exception:
-                try:
-                    return int(float(v))
-                except Exception:
-                    return 0
-    # fallback 0 jika tidak ada
-    return 0
-
-
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_top_products(request):
     try:
-        token = get_token()
+        token = get_token()  # Ambil token Shopee kamu
         timest = int(time.time())
 
         # === Base info ===
@@ -197,7 +189,9 @@ def get_top_products(request):
         def get_month_range(dt: datetime.datetime):
             start = datetime.datetime(dt.year, dt.month, 1)
             next_month = datetime.datetime(
-                dt.year + (dt.month // 12), ((dt.month % 12) + 1), 1
+                dt.year + (dt.month // 12),
+                ((dt.month % 12) + 1),
+                1
             )
             end = next_month - datetime.timedelta(seconds=1)
             return start, end
@@ -244,7 +238,7 @@ def get_top_products(request):
 
         # === Helper: fetch detail order (batch 50) + hitung per produk ===
         def fetch_top_products(order_sns):
-            product_sales = {}
+            product_counter = Counter()
             for i in range(0, len(order_sns), 50):
                 batch = order_sns[i:i+50]
                 payload = {
@@ -258,39 +252,38 @@ def get_top_products(request):
                 for order in order_list:
                     if order.get("order_status") == "CANCELLED":
                         continue
-                    for item in order.get("item_list", []):
-                        item_id = item.get("item_id")
-                        name = item.get("item_name")
-                        qty = item.get("model_quantity_purchased", 0)
+                    if order.get("order_status") == "TO_CONFIRM_RECEIVE" or order.get("order_status") == "COMPLETED":
+                        for item in order.get("item_list", []):
+                            name = item.get("item_name")
+                            qty = item.get("model_quantity_purchased", 0)
+                            product_counter[name] += qty
 
-                        if item_id not in product_sales:
-                            product_sales[item_id] = {
-                                "name": name,
-                                "sold": 0
-                            }
-                        product_sales[item_id]["sold"] += qty
+            # Ambil 5 produk teratas
+            top_5 = product_counter.most_common(5)
+            return [{"name": n, "sold": s} for n, s in top_5]
 
-            # urutkan berdasarkan sold
-            sorted_products = sorted(
-                product_sales.values(),
-                key=lambda x: x["sold"],
-                reverse=True
-            )[:5]
+        # === Tentukan bulan (query param opsional) ===
+        month = request.GET.get("month")
+        year = request.GET.get("year")
+        if month and year:
+            month = int(month)
+            year = int(year)
+            target_date = datetime.datetime(year, month, 1)
+        else:
+            target_date = now
 
-            return sorted_products
+        start_month, end_month = get_month_range(target_date)
+        all_order_sns = fetch_full_month(start_month, end_month)
+        top_products = fetch_top_products(all_order_sns)
 
-        # Bulan ini
-        this_start, this_end = get_month_range(now)
-        this_month_sns = fetch_full_month(this_start, this_end)
-        top_this_month = fetch_top_products(this_month_sns)
-
-        return JsonResponse(
-            top_this_month, safe=False)
+        return JsonResponse(top_products, safe=False)
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
-
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def fetch_orders_in_range(start_time, end_time, token, path, url_base, page_size=100):
     """Helper untuk fetch order dengan pagination Shopee."""
     total_orders = 0
@@ -322,7 +315,9 @@ def fetch_orders_in_range(start_time, end_time, token, path, url_base, page_size
 
     return total_orders
 
-
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_month_date_ranges(year, month):
     """Bagi 1 bulan jadi beberapa range 15 hari."""
     first_day = datetime.datetime(year, month, 1)
@@ -340,7 +335,9 @@ def get_month_date_ranges(year, month):
         current_start = current_end
     return ranges
 
-
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_total_orders_month(request):
     try:
         # --- Token & Signing
@@ -381,7 +378,9 @@ def get_total_orders_month(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
-
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_shopee_orders_year(request):
     try:
         token = get_token()
@@ -391,8 +390,7 @@ def get_shopee_orders_year(request):
         url_base = f"{host}{path}?partner_id={partner_id}&timestamp={timest}&access_token={token.access_token}&shop_id={shop_id}&sign={sign}"
 
         now = datetime.datetime.now()
-        year = now.year
-
+        year = int(request.GET.get("year"))
         # Jan–Des
         sales_data = {}
 
@@ -413,7 +411,9 @@ def get_shopee_orders_year(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
-
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_total_customers(request):
     try:
         token = get_token()
@@ -530,7 +530,9 @@ def get_total_customers(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
-
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_total_sold(request):
     try:
         token = get_token()
@@ -647,7 +649,9 @@ def get_total_sold(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
-
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_total_gmv(request):
     try:
         token = get_token()
@@ -766,7 +770,9 @@ def get_total_gmv(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
-
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_shopee_stats(request):
     try:
         token = get_token()
@@ -782,8 +788,7 @@ def get_shopee_stats(request):
         )
 
         detail_path = "/api/v2/order/get_order_detail"
-        detail_sign = generate_sign_public(
-            detail_path, timest, token.access_token)
+        detail_sign = generate_sign_public(detail_path, timest, token.access_token)
         detail_url = (
             f"{host}{detail_path}?partner_id={partner_id}"
             f"&timestamp={timest}&access_token={token.access_token}"
@@ -792,6 +797,21 @@ def get_shopee_stats(request):
 
         page_size = 100
         now = datetime.datetime.now()
+
+        # === Ambil filter dari query (opsional) ===
+        month_param = request.GET.get("month")
+        year_param = request.GET.get("year")
+
+        # Jika user mengisi month & year → pakai itu
+        if month_param and year_param:
+            try:
+                month = int(month_param)
+                year = int(year_param)
+                filter_date = datetime.datetime(year, month, 1)
+            except ValueError:
+                return JsonResponse({"error": "Invalid month/year format"}, status=400)
+        else:
+            filter_date = now  # default: bulan ini
 
         # === Helper: awal & akhir bulan ===
         def get_month_range(dt: datetime.datetime):
@@ -834,8 +854,7 @@ def get_shopee_stats(request):
             all_orders = []
             temp_start = start_month
             while temp_start < end_month:
-                temp_end = min(
-                    temp_start + datetime.timedelta(days=15), end_month)
+                temp_end = min(temp_start + datetime.timedelta(days=15), end_month)
                 all_orders.extend(fetch_orders_in_range(temp_start, temp_end))
                 temp_start = temp_end
             return all_orders
@@ -844,7 +863,7 @@ def get_shopee_stats(request):
         def fetch_order_details(order_sns):
             details = []
             for i in range(0, len(order_sns), 50):
-                batch = order_sns[i:i+50]
+                batch = order_sns[i:i + 50]
                 payload = {
                     "order_sn_list": ",".join(batch),
                     "response_optional_fields": "item_list,order_status,buyer_user_id",
@@ -874,27 +893,27 @@ def get_shopee_stats(request):
                     buyers.append(buyer_id)
                 for item in order.get("item_list", []):
                     qty = item.get("model_quantity_purchased", 0)
-                    # harga diskon
                     price = float(item.get("model_discounted_price", 0))
                     total_sold += qty
                     gmv += qty * price
 
             return {
                 "total_orders": total_orders,
-                "customers": len(buyers),  # duplikat dihitung
+                "customers": len(buyers),
                 "sold": total_sold,
                 "gmv": gmv,
             }
 
-        # Bulan ini
-        this_start, this_end = get_month_range(now)
+        # === Hitung bulan yang dipilih ===
+        this_start, this_end = get_month_range(filter_date)
         this_stats = calculate_stats(this_start, this_end)
 
-        # Bulan lalu
+        # === Hitung bulan sebelumnya ===
         last_month_ref = this_start - datetime.timedelta(days=1)
         last_start, last_end = get_month_range(last_month_ref)
         last_stats = calculate_stats(last_start, last_end)
 
+        # === Response akhir (masih sama) ===
         return JsonResponse({
             "this_month": this_stats,
             "last_month": last_stats,
@@ -904,6 +923,9 @@ def get_shopee_stats(request):
         return JsonResponse({"error": str(e)}, status=500)
 
 
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_item_list(token):
     timest = int(time.time())
     path = "/api/v2/product/get_item_list"
@@ -912,7 +934,9 @@ def get_item_list(token):
     url = f"{host}{path}?partner_id={partner_id}&timestamp={timest}&access_token={token.access_token}&shop_id={shop_id}&sign={sign}"
     return requests.get(url).json()
 
-
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_item_detail(token, item_ids):
     timest = int(time.time())
     path = "/api/v2/product/get_item_base_info"
@@ -922,7 +946,9 @@ def get_item_detail(token, item_ids):
     url = f"{host}{path}?partner_id={partner_id}&timestamp={timest}&access_token={token.access_token}&shop_id={shop_id}&sign={sign}&item_id_list={item_id_str}"
     return requests.get(url).json()
 
-
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def product_list(request):
     try:
         token = get_token()
@@ -993,8 +1019,9 @@ def get_order_list(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
-
-
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_order_detail(request):
     try:
         token = get_token()
@@ -1020,7 +1047,9 @@ def get_order_detail(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
-
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_tracking_number(request):
     try:
         token = get_token()
@@ -1045,7 +1074,9 @@ def get_tracking_number(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
-
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_tracking_info(request):
     try:
         token = get_token()
@@ -1070,7 +1101,9 @@ def get_tracking_info(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
-
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_return_list(request):
     try:
         token = get_token()
@@ -1099,7 +1132,9 @@ def get_return_list(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
-
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_return_detail(request):
     try:
         token = get_token()
@@ -1119,7 +1154,9 @@ def get_return_detail(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
-
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def get_top_5_products(request):
     try:
         token = get_token()
