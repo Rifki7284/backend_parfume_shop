@@ -281,9 +281,7 @@ def get_top_products(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
-@csrf_exempt
-@api_view(["GET"])
-@permission_classes([IsAuthenticated, IsStaffUser])
+
 def fetch_orders_in_range(start_time, end_time, token, path, url_base, page_size=100):
     """Helper untuk fetch order dengan pagination Shopee."""
     total_orders = 0
@@ -315,9 +313,6 @@ def fetch_orders_in_range(start_time, end_time, token, path, url_base, page_size
 
     return total_orders
 
-@csrf_exempt
-@api_view(["GET"])
-@permission_classes([IsAuthenticated, IsStaffUser])
 def get_month_date_ranges(year, month):
     """Bagi 1 bulan jadi beberapa range 15 hari."""
     first_day = datetime.datetime(year, month, 1)
@@ -388,8 +383,6 @@ def get_shopee_orders_year(request):
         path = "/api/v2/order/get_order_list"
         sign = generate_sign_public(path, timest, token.access_token)
         url_base = f"{host}{path}?partner_id={partner_id}&timestamp={timest}&access_token={token.access_token}&shop_id={shop_id}&sign={sign}"
-
-        now = datetime.datetime.now()
         year = int(request.GET.get("year"))
         # Jan–Des
         sales_data = {}

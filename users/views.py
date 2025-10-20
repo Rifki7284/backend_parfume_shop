@@ -18,7 +18,6 @@ def Check_token(request):
     })
 @permission_classes([AllowAny])
 class StaffLoginView(APIView):
-
     def post(self, request, *args, **kwargs):
         username = request.data.get("username")
         password = request.data.get("password")
